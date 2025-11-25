@@ -8,10 +8,8 @@ app.use(express.json());
 // ==== CONFIG TELEGRAM ====
 const apiId = 30369830;
 const apiHash = "6378abccfbd01160d80f4628b8592484";
-const stringSessionValue = "1BQANOTEuMTA4LjU2LjE1MgG7j2k0TIfvwXVCL34t2JFZjLmg6jQjog+03edixMmow4a6jzzpBEluxV6Sp/WAW+DrkN1wlRWEmVnPgom823SVkZxQeAhn+AJAsUP4OcBfzQstj4bEOAOBUacoHPWRegGEFtmuusGLlguHBWI1ZhF60CJ6+Ytt5EK73G1Vaz9/M4QfN8w5VUcE67VxL++O7ouzrWODj/eI7H8h5ZkyycCGErK62kHWj3aNNZoUKyC5m5hh+ehy/tdTStHy0ECv8sHFlGeJHZRmRFxObsjdSRK/+PpxV5HZEiTWDkI1LpGKt2QLO9JPMXwkhA+OH2LOJh7BiP3XZ2FOFstLDXts9rohZQ=="; // Nhúng thẳng session string của bạn vào đây
+const stringSessionValue = "1BQANOTEuMTA4LjU2LjE1MgG7j2k0TIfvwXVCL34t2JFZjLmg6jQjog+03edixMmow4a6jzzpBEluxV6Sp/WAW+DrkN1wlRWEmVnPgom823SVkZxQeAhn+AJAsUP4OcBfzQstj4bEOAOBUacoHPWRegGEFtmuusGLlguHBWI1ZhF60CJ6+Ytt5EK73G1Vaz9/M4QfN8w5VUcE67VxL++O7ouzrWODj/eI7H8h5ZkyycCGErK62kHWj3aNNZoUKyC5m5hh+ehy/tdTStHy0ECv8sHFlGeJHZRmRFxObsjdSRK/+PpxV5HZEiTWDkI1LpGKt2QLO9JPMXwkhA+OH2LOJh7BiP3XZ2FOFstLDXts9rohZQ==";
 const groupId = -1002581473706;
-const defaultLimitMessages = 100;
-const concurrencyMessages = 10;
 
 // Xử lý song song
 async function mapLimit(array, limit, asyncFn) {
@@ -28,10 +26,11 @@ async function mapLimit(array, limit, asyncFn) {
   return results;
 }
 
-// Endpoint crawl
+// Endpoint crawl theo batch “from → to”
 app.get("/crawl", async (req, res) => {
   try {
-    const limitMessages = parseInt(req.query.limit) || defaultLimitMessages;
+    const from = parseInt(req.query.from) || 1;   // ví dụ 1
+    const to = parseInt(req.query.to) || 30;      // ví dụ 30
 
     const stringSession = new StringSession(stringSessionValue);
     const client = new TelegramClient(stringSession, apiId, apiHash, { connectionRetries: 5 });
@@ -51,20 +50,23 @@ app.get("/crawl", async (req, res) => {
 
     const entity = await client.getEntity(groupId);
     const msgs = [];
+    let count = 0;
 
-    for await (const msg of client.iterMessages(entity, { limit: limitMessages * 5 })) {
+    // iterMessages đọc từ mới nhất → cũ nhất
+    for await (const msg of client.iterMessages(entity)) {
+      count++;
+      if (count < from) continue;   // bỏ qua tin nhắn trước "from"
+      if (count > to) break;        // dừng khi vượt "to"
+
+      // chỉ lấy tin nhắn chất lượng
       if (!msg.text) continue;
       if (msg.text.length < 50) continue;
+      if (msg.media) continue;
 
-      if (msgs.find(m => m.id === msg.id)) continue; // tránh trùng
       msgs.push(msg);
-
-      if (msgs.length >= limitMessages) break; // đủ số lượng thì dừng
     }
 
-    const results = await mapLimit(msgs, concurrencyMessages, async (msg) => {
-      return { id: msg.id, text: msg.text };
-    });
+    const results = await mapLimit(msgs, 10, async (msg) => ({ id: msg.id, text: msg.text }));
 
     res.json({ success: true, total: results.length, messages: results });
   } catch (err) {
