@@ -26,23 +26,22 @@ async function mapLimit(array, limit, asyncFn) {
   return results;
 }
 
-// Endpoint crawl theo batch “from → to”
+// ==== Endpoint crawl từ cũ nhất → mới nhất ====
 app.get("/crawl", async (req, res) => {
   try {
-    const from = parseInt(req.query.from) || 1;   // ví dụ 1
-    const to = parseInt(req.query.to) || 30;      // ví dụ 30
+    const from = parseInt(req.query.from) || 1;
+    const to = parseInt(req.query.to) || 50;
 
-    const stringSession = new StringSession(stringSessionValue);
-    const client = new TelegramClient(stringSession, apiId, apiHash, { connectionRetries: 5 });
+    const client = new TelegramClient(new StringSession(stringSessionValue), apiId, apiHash, { connectionRetries: 5 });
 
-    // Bắt lỗi session hết hạn
+    // kiểm tra session
     try {
       await client.start({ botAuthToken: () => null });
     } catch (err) {
       if (err.message.includes("SESSION_PASSWORD_NEEDED") || err.message.includes("PHONE_NUMBER_INVALID")) {
         return res.status(401).json({
           success: false,
-          error: "Session Telegram đã hết hạn hoặc không hợp lệ. Vui lòng tạo session mới."
+          error: "Session Telegram hết hạn hoặc không hợp lệ. Cần tạo session mới."
         });
       }
       throw err;
@@ -52,13 +51,12 @@ app.get("/crawl", async (req, res) => {
     const msgs = [];
     let count = 0;
 
-    // iterMessages đọc từ mới nhất → cũ nhất
-    for await (const msg of client.iterMessages(entity)) {
+    // iterMessages từ cũ → mới
+    for await (const msg of client.iterMessages(entity, { reverse: true })) {
       count++;
-      if (count < from) continue;   // bỏ qua tin nhắn trước "from"
-      if (count > to) break;        // dừng khi vượt "to"
+      if (count < from) continue;
+      if (count > to) break;
 
-      // chỉ lấy tin nhắn chất lượng
       if (!msg.text) continue;
       if (msg.text.length < 50) continue;
       if (msg.media) continue;
@@ -68,7 +66,13 @@ app.get("/crawl", async (req, res) => {
 
     const results = await mapLimit(msgs, 10, async (msg) => ({ id: msg.id, text: msg.text }));
 
-    res.json({ success: true, total: results.length, messages: results });
+    res.json({
+      success: true,
+      from,
+      to,
+      total: results.length,
+      messages: results
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: err.message });
