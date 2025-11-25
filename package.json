@@ -1,0 +1,25 @@
+{
+  "name": "telegram-crawler",
+  "version": "1.0.0",
+  "description": "Crawl message history từ Telegram bằng TDLib",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cloudinary": "^2.8.0",
+    "express": "^5.1.0",
+    "fs": "^0.0.1-security",
+    "playwright": "^1.56.1",
+    "playwright-chromium": "^1.56.1",
+    "puppeteer": "^24.31.0",
+    "readline-sync": "^1.4.10",
+    "telegram": "^2.26.22"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "author": "Việt Bùi Xuân",
+  "license": "MIT",
+  "keywords": []
+}
