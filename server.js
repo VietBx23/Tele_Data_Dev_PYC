@@ -1,6 +1,8 @@
 const express = require("express");
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 app.use(express.json());
@@ -8,10 +10,24 @@ app.use(express.json());
 // ==== CONFIG TELEGRAM ====
 const apiId = 30369830;
 const apiHash = "6378abccfbd01160d80f4628b8592484";
-const stringSessionValue = "1BQANOTEuMTA4LjU2LjE1MgG7j2k0TIfvwXVCL34t2JFZjLmg6jQjog+03edixMmow4a6jzzpBEluxV6Sp/WAW+DrkN1wlRWEmVnPgom823SVkZxQeAhn+AJAsUP4OcBfzQstj4bEOAOBUacoHPWRegGEFtmuusGLlguHBWI1ZhF60CJ6+Ytt5EK73G1Vaz9/M4QfN8w5VUcE67VxL++O7ouzrWODj/eI7H8h5ZkyycCGErK62kHWj3aNNZoUKyC5m5hh+ehy/tdTStHy0ECv8sHFlGeJHZRmRFxObsjdSRK/+PpxV5HZEiTWDkI1LpGKt2QLO9JPMXwkhA+OH2LOJh7BiP3XZ2FOFstLDXts9rohZQ==";
+const stringSessionValue = "1BQANOTEuMTA4LjU2LjE1MgG7Y5xvRN+0Igtz7phwGA1H0XL/2WUr4UyO0iQfH52mO2SE4AEDdCl4w3QQtliXSZ2VeMGK4lNU9153Qu5fAoLZzgR8+pIxrxMts2G1nEOBeJ2nx/oYrDbVz/v6ID20Ow+3LIR38c/tMtU+9mOe1Wd3g32XJDx/rOjgQX5aZxsjtmvj1r9stEWvGwGeQdeelg73zG3RLXjtRxZvGFc+k6gCdhmnrYWCNjxC4LuU2DvrhxBnrYUlG+KUG1bFUQaYpV0CvF4F5lPRg2EHINletoAXz/qdKtnv4wy31FxN8vXEi8SQWB6+7magcMa+F9l+rFBXmggNYrUPyEMQ3/hetatI2w==";
 const groupId = -1002581473706;
 
-// Xử lý song song
+// ==== Crawl state file ====
+const stateFile = path.join(__dirname, "crawl_state.json");
+
+function loadCrawlState() {
+  if (fs.existsSync(stateFile)) {
+    return JSON.parse(fs.readFileSync(stateFile, "utf-8"));
+  }
+  return { from: 1, to: 50 }; // default
+}
+
+function saveCrawlState(state) {
+  fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+}
+
+// ==== Xử lý song song ====
 async function mapLimit(array, limit, asyncFn) {
   const results = [];
   let i = 0;
@@ -26,45 +42,55 @@ async function mapLimit(array, limit, asyncFn) {
   return results;
 }
 
-// ==== Endpoint crawl từ cũ nhất → mới nhất ====
+// ==== API crawl ====
 app.get("/crawl", async (req, res) => {
+  const batchSize = parseInt(req.query.batch) || 50; // số lượng crawl 1 lần
+  const state = loadCrawlState();
+  const from = parseInt(req.query.from) || state.from;
+  const to = parseInt(req.query.to) || state.to;
+
+  const client = new TelegramClient(new StringSession(stringSessionValue), apiId, apiHash, { connectionRetries: 5 });
+
   try {
-    const from = parseInt(req.query.from) || 1;
-    const to = parseInt(req.query.to) || 50;
-
-    const client = new TelegramClient(new StringSession(stringSessionValue), apiId, apiHash, { connectionRetries: 5 });
-
-    // kiểm tra session
-    try {
-      await client.start({ botAuthToken: () => null });
-    } catch (err) {
-      if (err.message.includes("SESSION_PASSWORD_NEEDED") || err.message.includes("PHONE_NUMBER_INVALID")) {
-        return res.status(401).json({
-          success: false,
-          error: "Session Telegram hết hạn hoặc không hợp lệ. Cần tạo session mới."
-        });
-      }
-      throw err;
+    await client.start({ botAuthToken: () => null });
+  } catch (err) {
+    if (err.message.includes("SESSION_PASSWORD_NEEDED") || err.message.includes("PHONE_NUMBER_INVALID")) {
+      return res.status(401).json({
+        success: false,
+        error: "Session Telegram hết hạn hoặc không hợp lệ. Cần tạo session mới."
+      });
     }
+    if (err.message.includes("AUTH_KEY_DUPLICATED")) {
+      return res.status(500).json({
+        success: false,
+        error: "Session Telegram bị trùng (AUTH_KEY_DUPLICATED). Vui lòng tạo session mới."
+      });
+    }
+    throw err;
+  }
 
+  try {
     const entity = await client.getEntity(groupId);
     const msgs = [];
     let count = 0;
 
-    // iterMessages từ cũ → mới
+    // Lấy tin nhắn từ cũ → mới
     for await (const msg of client.iterMessages(entity, { reverse: true })) {
       count++;
       if (count < from) continue;
       if (count > to) break;
 
       if (!msg.text) continue;
-      if (msg.text.length < 50) continue;
+      if (msg.text.length < 100) continue; // chỉ lấy text >= 100 ký tự
       if (msg.media) continue;
 
-      msgs.push(msg);
+      msgs.push({ id: msg.id, text: msg.text });
     }
 
-    const results = await mapLimit(msgs, 10, async (msg) => ({ id: msg.id, text: msg.text }));
+    const results = await mapLimit(msgs, 10, async (msg) => msg);
+
+    // Cập nhật crawl_state.json
+    saveCrawlState({ from, to });
 
     res.json({
       success: true,
@@ -73,6 +99,7 @@ app.get("/crawl", async (req, res) => {
       total: results.length,
       messages: results
     });
+
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: err.message });
