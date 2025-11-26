@@ -10,7 +10,7 @@ app.use(express.json());
 // ==== CONFIG TELEGRAM ====
 const apiId = 30369830;
 const apiHash = "6378abccfbd01160d80f4628b8592484";
-const stringSessionValue = "1BQANOTEuMTA4LjU2LjE1MgG7Y5xvRN+0Igtz7phwGA1H0XL/2WUr4UyO0iQfH52mO2SE4AEDdCl4w3QQtliXSZ2VeMGK4lNU9153Qu5fAoLZzgR8+pIxrxMts2G1nEOBeJ2nx/oYrDbVz/v6ID20Ow+3LIR38c/tMtU+9mOe1Wd3g32XJDx/rOjgQX5aZxsjtmvj1r9stEWvGwGeQdeelg73zG3RLXjtRxZvGFc+k6gCdhmnrYWCNjxC4LuU2DvrhxBnrYUlG+KUG1bFUQaYpV0CvF4F5lPRg2EHINletoAXz/qdKtnv4wy31FxN8vXEi8SQWB6+7magcMa+F9l+rFBXmggNYrUPyEMQ3/hetatI2w==";
+const stringSessionValue = "1BQANOTEuMTA4LjU2LjE1MgG7bCQqmduEaTgU18grcaroU0OJvWF2h1qwQSjQbgc5sdhXkSzupDidixjsoZDfIddWJzVLwE+ekWqtoTakGEn2/tRJk488MkKz1c4jUal033gOMxNomME+e0cDM5pWOVgrBws+ImiipszzsciEjBdqeZDmWV8BBfv8UDvltFMGoLugN9mxIejOtU1/C6DDYDo/6I6Re7lJ5EudHbvUMivRosK2xdrRemqLo3ihh9/FkXMbfx8CjDRQLhT7SL1tXWrBPHx9CrH53qKxXhWLw2EfRKw8ZbhkrMTwEwL6LdUMNH1X2gf5Q+gExCiMp0xAOPclS/+SVZT+aCwQuA3lz8AR5A==";
 const groupId = -1002581473706;
 
 // ==== Crawl state file ====
