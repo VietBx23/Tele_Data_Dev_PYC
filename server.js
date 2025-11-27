@@ -10,7 +10,7 @@ app.use(express.json());
 // ==== CONFIG TELEGRAM ====
 const apiId = 30369830;
 const apiHash = "6378abccfbd01160d80f4628b8592484";
-const stringSessionValue = "1BQANOTEuMTA4LjU2LjE1MgG7bCQqmduEaTgU18grcaroU0OJvWF2h1qwQSjQbgc5sdhXkSzupDidixjsoZDfIddWJzVLwE+ekWqtoTakGEn2/tRJk488MkKz1c4jUal033gOMxNomME+e0cDM5pWOVgrBws+ImiipszzsciEjBdqeZDmWV8BBfv8UDvltFMGoLugN9mxIejOtU1/C6DDYDo/6I6Re7lJ5EudHbvUMivRosK2xdrRemqLo3ihh9/FkXMbfx8CjDRQLhT7SL1tXWrBPHx9CrH53qKxXhWLw2EfRKw8ZbhkrMTwEwL6LdUMNH1X2gf5Q+gExCiMp0xAOPclS/+SVZT+aCwQuA3lz8AR5A==";
+const stringSessionValue = "1BQANOTEuMTA4LjU2LjE1MgG7QDO3pQ1ykr8p+K5ULT3se6Md9nelFRJpH65OUzSzoBAA3rE02nCB3NrwGnX5u/n0qzPC26hRo57t5VTaTVdONQeXji7U/evaMaiKYxN/l94ScPOt9yELBZiNZ8U71UaFGLpWLZpnWq65f8zXnXcU48JCQGST6TU2JJL90JQPqjNf0Pqn0wLAmGjYvkykPhWwiNPvHeq6OCPBGyr7hUtELE2kfnnolOTOzWCyTcGkdyLSb2Z4hogQKeXmwOUDD5++9O2+gIamM7DVxHfTSwsxPQNOOVcl17B9Gr/sUYU9K8053KKOl3M3C7xVpLOjdSHMaNhYei+dT2+VLcGA+gem8w==;
 const groupId = -1002581473706;
 
 // ==== Crawl state file ====
@@ -107,3 +107,4 @@ app.get("/crawl", async (req, res) => {
 });
 
 app.listen(3000, () => console.log("✅ API Telegram chạy ở http://localhost:3000"));
+
