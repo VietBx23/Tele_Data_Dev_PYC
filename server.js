@@ -7,7 +7,7 @@ const ImageKit = require("imagekit");
 const app = express();
 const port = process.env.PORT || 3000;
 
-// Cấu hình từ biến môi trường
+// ==== CẤU HÌNH BIẾN MÔI TRƯỜNG ====
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH;
 const sessionString = process.env.TELEGRAM_SESSION || ""; 
@@ -24,10 +24,10 @@ const imagekit = new ImageKit({
 const stringSession = new StringSession(sessionString);
 const client = new TelegramClient(stringSession, apiId, apiHash, {
     connectionRetries: 5,
-    useWSS: true // Tối ưu cho môi trường cloud
+    useWSS: true // Tối ưu kết nối trên server cloud
 });
 
-// Hàm upload Media
+// Hàm hỗ trợ upload Media lên ImageKit
 async function uploadToImageKit(buffer, filename) {
     try {
         const response = await imagekit.upload({
@@ -42,10 +42,10 @@ async function uploadToImageKit(buffer, filename) {
     }
 }
 
-// Endpoint check health (Giúp Render biết app vẫn sống)
-app.get('/', (req, res) => res.send('Bot is running! 🚀'));
+// Kiểm tra trạng thái server
+app.get('/', (req, res) => res.send('API Telegram Crawler is Active! 🚀'));
 
-// API Crawl
+// API CRAWL CHÍNH
 app.get('/crawl', async (req, res) => {
     try {
         const fromRange = parseInt(req.query.from) || 1;
@@ -53,9 +53,13 @@ app.get('/crawl', async (req, res) => {
         const groupId = req.query.groupId || defaultGroupId;
         const limit = Math.max(toRange - fromRange + 1, 1);
 
-        console.log(`--- Đang crawl ${limit} tin nhắn từ Group: ${groupId} ---`);
+        console.log(`--- Đang yêu cầu: ${limit} tin nhắn từ Group: ${groupId} ---`);
 
-        if (!client.connected) await client.connect();
+        // Đảm bảo client luôn kết nối
+        if (!client.connected) {
+            console.log("Đang kết nối lại Telegram...");
+            await client.connect();
+        }
 
         const entity = await client.getEntity(groupId);
         const messages = await client.getMessages(entity, {
@@ -66,16 +70,20 @@ app.get('/crawl', async (req, res) => {
 
         const results = [];
         for (const msg of messages) {
-            if (!msg.text && !msg.video && !msg.photo) continue;
+            // ĐIỀU KIỆN QUAN TRỌNG: Chỉ lấy tin nhắn có chữ (text hoặc caption)
+            if (!msg.text || msg.text.trim() === "") {
+                continue; 
+            }
 
             let mediaPath = null;
             let mediaType = 'text';
 
+            // Xử lý nếu có kèm Video hoặc Ảnh
             if (msg.video || msg.photo) {
                 const isVideo = !!msg.video;
                 mediaType = isVideo ? 'video' : 'image';
                 
-                // Tải media với worker để tránh nghẽn
+                console.log(`Đang tải media cho message_id: ${msg.id}...`);
                 const buffer = await client.downloadMedia(msg, { workers: 2 });
                 if (buffer) {
                     mediaPath = await uploadToImageKit(buffer, `msg_${msg.id}_${Date.now()}.${isVideo ? 'mp4' : 'jpg'}`);
@@ -84,9 +92,10 @@ app.get('/crawl', async (req, res) => {
 
             results.push({
                 channel: entity.title || "Telegram Group",
+                channel_username: entity.username || groupId.toString(),
                 message_id: msg.id,
                 message_url: `https://t.me/c/${groupId.toString().replace('-100', '')}/${msg.id}`,
-                content: msg.text || "",
+                content: msg.text,
                 media_type: mediaType,
                 media_path: mediaPath,
                 thumbnail_path: (mediaType === 'video' && mediaPath) ? `${mediaPath}?tr=so-0` : mediaPath,
@@ -94,7 +103,13 @@ app.get('/crawl', async (req, res) => {
             });
         }
 
-        res.json({ success: true, count: results.length, data: results });
+        console.log(`✅ Hoàn thành crawl. Tìm thấy: ${results.length} tin nhắn hợp lệ.`);
+        res.json({
+            success: true,
+            total_requested: limit,
+            total_found: results.length,
+            data: results
+        });
 
     } catch (error) {
         console.error("❌ Crawl Error:", error.message);
@@ -102,15 +117,15 @@ app.get('/crawl', async (req, res) => {
     }
 });
 
-// Xử lý lỗi hệ thống để app không bị crash
-process.on('uncaughtException', (err) => console.error('Lỗi hệ thống:', err));
+// Chống crash server khi có lỗi không mong muốn
+process.on('uncaughtException', (err) => console.error('Lỗi nghiêm trọng:', err));
 
 app.listen(port, async () => {
-    console.log(`🚀 Server on port: ${port}`);
+    console.log(`🚀 Server đang chạy tại port: ${port}`);
     try {
         await client.connect();
-        console.log("✅ Telegram Connected!");
+        console.log("✅ Kết nối Telegram thành công!");
     } catch (err) {
-        console.error("❌ Connection Failed:", err.message);
+        console.error("❌ Kết nối Telegram thất bại:", err.message);
     }
 });
