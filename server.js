@@ -2,7 +2,7 @@ const express = require('express');
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const ImageKit = require("imagekit");
-
+require('dotenv').config()
 const app = express();
 const port = process.env.PORT || 3000;
 
