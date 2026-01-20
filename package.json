@@ -20,7 +20,8 @@
     "playwright-chromium": "^1.56.1",
     "puppeteer": "^24.31.0",
     "readline-sync": "^1.4.10",
-    "telegram": "^2.26.22"
+    "telegram": "^2.26.22",
+    "dotenv": "^16.4.5"
   },
   "engines": {
     "node": ">=18.0.0"
