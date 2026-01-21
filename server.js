@@ -1,119 +1,112 @@
-const express = require('express');
+const express = require("express");
 const { TelegramClient } = require("telegram");
 const { StringSession } = require("telegram/sessions");
 const fs = require("fs");
 const path = require("path");
-require('dotenv').config();
+require('dotenv').config(); // Dùng dotenv để test local
 
 const app = express();
-const port = process.env.PORT || 3000;
+app.use(express.json());
 
-const exportDir = path.join(__dirname, 'exports');
-if (!fs.existsSync(exportDir)) fs.mkdirSync(exportDir);
-
+// ==== CONFIG (Lấy từ Environment Variables của Render) ====
 const apiId = parseInt(process.env.TELEGRAM_API_ID);
 const apiHash = process.env.TELEGRAM_API_HASH;
-const sessionString = process.env.TELEGRAM_SESSION || ""; 
+const stringSessionValue = process.env.TELEGRAM_SESSION;
+// Cổng mặc định của Render hoặc 3000 nếu chạy local
+const PORT = process.env.PORT || 3000;
 
-const stringSession = new StringSession(sessionString);
-const client = new TelegramClient(stringSession, apiId, apiHash, { 
+// Đường dẫn lưu file (Trên Render nên dùng /tmp hoặc cấu hình Disk)
+const stateFile = path.join(__dirname, "crawl_state.json");
+
+function loadCrawlState() {
+    if (fs.existsSync(stateFile)) {
+        try {
+            return JSON.parse(fs.readFileSync(stateFile, "utf-8"));
+        } catch (e) { return { from: 1, to: 100 }; }
+    }
+    return { from: 1, to: 100 };
+}
+
+function saveCrawlState(state) {
+    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2));
+}
+
+// Khởi tạo Client bên ngoài route để tránh khởi tạo lại nhiều lần
+const client = new TelegramClient(new StringSession(stringSessionValue), apiId, apiHash, {
     connectionRetries: 5,
-    floodSleepThreshold: 60 
+    floodSleepThreshold: 60
 });
 
-app.get('/crawl', async (req, res) => {
+// ==== API crawl ====
+app.get("/crawl", async (req, res) => {
     try {
-        // 1. Lấy danh sách nhóm
         const groupsInput = req.query.groups;
-        if (!groupsInput) {
-            return res.status(400).json({ success: false, message: "Thiếu tham số groups (Ví dụ: ?groups=-100123,username,id2)" });
-        }
-        
-        const groupList = groupsInput.split(',').map(g => g.trim());
-        const fromRange = parseInt(req.query.from) || 1;
-        const toRange = parseInt(req.query.to) || 500; // Tăng range để tìm được nhiều video hơn
+        if (!groupsInput) return res.status(400).json({ success: false, message: "Thiếu groups" });
 
-        const limit = Math.max(Math.abs(toRange - fromRange) + 1, 1);
-        const offsetCount = Math.max(fromRange - 1, 0);
+        const state = loadCrawlState();
+        const from = parseInt(req.query.from) || state.from;
+        const to = parseInt(req.query.to) || state.to;
+        const maxLimit = 1000; // Giới hạn theo yêu cầu của bạn
 
         if (!client.connected) await client.connect();
 
-        // Hàm xử lý từng group
-        const processGroup = async (groupId) => {
+        const groupList = groupsInput.split(',').map(g => g.trim());
+        let allResults = [];
+
+        for (const groupId of groupList) {
             try {
                 const entity = await client.getEntity(groupId);
-                const cleanId = groupId.toString().replace("-100", "");
-                const baseUrl = entity.username ? `https://t.me/${entity.username}` : `https://t.me/c/${cleanId}`;
+                let count = 0;
 
-                console.log(`📡 Đang quét Group: ${entity.title || groupId}`);
+                // Sử dụng iterMessages để duyệt hiệu quả
+                for await (const msg of client.iterMessages(entity, { reverse: true })) {
+                    count++;
+                    if (count < from) continue;
+                    if (count > to) break;
+                    if (allResults.length >= maxLimit) break;
 
-                const messages = await client.getMessages(entity, {
-                    limit: limit,
-                    addOffset: offsetCount,
-                    reverse: true 
-                });
-
-                let results = [];
-                for (const msg of messages) {
-                    // Kiểm tra Video (bao gồm cả file document dạng video)
+                    // Lọc Video + Có Content
                     const isVideo = msg.video || (msg.media?.document?.mimeType?.includes('video'));
                     const caption = msg.message ? msg.message.trim() : "";
 
-                    // CHỈ LẤY NẾU CÓ CẢ VIDEO + CHỮ
                     if (isVideo && caption) {
-                        results.push({
-                            message_id: msg.id,
-                            group_name: entity.title,
-                            content: caption,
-                            media_type: 'video',
-                            message_url: `${baseUrl}/${msg.id}`, 
-                            date: new Date(msg.date * 1000).toISOString().slice(0, 19).replace('T', ' ')
+                        allResults.push({
+                            id: msg.id,
+                            group: entity.title,
+                            text: caption,
+                            date: new Date(msg.date * 1000).toISOString()
                         });
                     }
                 }
-                return results;
-            } catch (err) {
-                console.error(`❌ Lỗi tại group [${groupId}]:`, err.message);
-                return [];
+            } catch (groupErr) {
+                console.error(`Lỗi group ${groupId}:`, groupErr.message);
             }
-        };
-
-        // 2. Chạy song song tất cả các group
-        const allNestedResults = await Promise.all(groupList.map(id => processGroup(id)));
-        
-        // 3. Gộp kết quả và GIỚI HẠN 1000 BẢN GHI
-        let finalData = allNestedResults.flat();
-        
-        if (finalData.length > 1000) {
-            console.log(`⚠️ Tìm thấy ${finalData.length} tin, nhưng chỉ lấy 1000 tin đầu tiên.`);
-            finalData = finalData.slice(0, 1000);
+            if (allResults.length >= maxLimit) break;
         }
 
-        // 4. Trả về và lưu file
-        if (finalData.length > 0) {
-            const timestamp = Date.now();
-            const fileName = `multi_group_video_${timestamp}.json`;
-            const finalOutput = {
-                success: true,
-                groups_processed: groupList.length,
-                total_found: finalData.length,
-                data: finalData
-            };
+        saveCrawlState({ from, to });
 
-            fs.writeFileSync(path.join(exportDir, fileName), JSON.stringify(finalOutput, null, 4));
-            console.log(`✅ Thành công! Đã lưu ${finalData.length} tin vào file.`);
-            res.json(finalOutput);
-        } else {
-            res.json({ success: true, message: "Không tìm thấy video nào có caption.", data: [] });
-        }
+        res.json({
+            success: true,
+            total_found: allResults.length,
+            data: allResults
+        });
 
-    } catch (error) {
-        console.error("🔥 Server Error:", error);
-        res.status(500).json({ success: false, error: error.message });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, error: err.message });
     }
 });
 
-app.listen(port, async () => {
-    console.log(`🚀 Server ready: http://localhost:${port}`);
-    await client.connect();
+// Route kiểm tra sức khỏe cho Render
+app.get("/", (req, res) => res.send("Bot is running..."));
+
+app.listen(PORT, async () => {
+    console.log(`✅ Server đang chạy tại port: ${PORT}`);
+    try {
+        await client.connect();
+        console.log("✅ Telegram connected!");
+    } catch (e) {
+        console.log("❌ Connection failed");
+    }
 });
