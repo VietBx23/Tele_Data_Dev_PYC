@@ -16,21 +16,25 @@ const apiHash = process.env.TELEGRAM_API_HASH;
 const sessionString = process.env.TELEGRAM_SESSION || ""; 
 
 const stringSession = new StringSession(sessionString);
-const client = new TelegramClient(stringSession, apiId, apiHash, { connectionRetries: 5 });
+const client = new TelegramClient(stringSession, apiId, apiHash, { 
+    connectionRetries: 5,
+    floodSleepThreshold: 60 
+});
 
 app.get('/crawl', async (req, res) => {
     try {
-        // 1. Lấy danh sách groups từ link (ngăn cách bằng dấu phẩy)
+        // 1. Lấy danh sách nhóm
         const groupsInput = req.query.groups;
         if (!groupsInput) {
-            return res.status(400).json({ success: false, message: "Thiếu tham số groups trên link!" });
+            return res.status(400).json({ success: false, message: "Thiếu tham số groups (Ví dụ: ?groups=-100123,username,id2)" });
         }
+        
         const groupList = groupsInput.split(',').map(g => g.trim());
-
-        // 2. Lấy số lượng (từ tin nhắn số... đến tin nhắn số...)
         const fromRange = parseInt(req.query.from) || 1;
-        const toRange = parseInt(req.query.to) || 10;
-        const limit = Math.abs(toRange - fromRange) + 1;
+        const toRange = parseInt(req.query.to) || 500; // Tăng range để tìm được nhiều video hơn
+
+        const limit = Math.max(Math.abs(toRange - fromRange) + 1, 1);
+        const offsetCount = Math.max(fromRange - 1, 0);
 
         if (!client.connected) await client.connect();
 
@@ -41,67 +45,75 @@ app.get('/crawl', async (req, res) => {
                 const cleanId = groupId.toString().replace("-100", "");
                 const baseUrl = entity.username ? `https://t.me/${entity.username}` : `https://t.me/c/${cleanId}`;
 
+                console.log(`📡 Đang quét Group: ${entity.title || groupId}`);
+
                 const messages = await client.getMessages(entity, {
                     limit: limit,
-                    addOffset: fromRange - 1,
+                    addOffset: offsetCount,
                     reverse: true 
                 });
 
-                let groupResults = [];
+                let results = [];
                 for (const msg of messages) {
-                    const cleanContent = msg.text ? msg.text.trim() : "";
-                    
-                    // CHỈ LƯU KHI CÓ CONTENT CHỮ
-                    if (!cleanContent) continue;
+                    // Kiểm tra Video (bao gồm cả file document dạng video)
+                    const isVideo = msg.video || (msg.media?.document?.mimeType?.includes('video'));
+                    const caption = msg.message ? msg.message.trim() : "";
 
-                    let mediaType = 'text';
-                    if (msg.photo) mediaType = 'image';
-                    else if (msg.video || (msg.media?.document?.mimeType?.includes('video'))) mediaType = 'video';
-                    else if (msg.media) mediaType = 'other_media';
-
-                    groupResults.push({
-                        message_id: msg.id,
-                        group_title: entity.title,
-                        group_id: groupId,
-                        content: cleanContent,
-                        media_type: mediaType,
-                        message_url: `${baseUrl}/${msg.id}`, 
-                        message_date: new Date(msg.date * 1000).toISOString().slice(0, 19).replace('T', ' ')
-                    });
+                    // CHỈ LẤY NẾU CÓ CẢ VIDEO + CHỮ
+                    if (isVideo && caption) {
+                        results.push({
+                            message_id: msg.id,
+                            group_name: entity.title,
+                            content: caption,
+                            media_type: 'video',
+                            message_url: `${baseUrl}/${msg.id}`, 
+                            date: new Date(msg.date * 1000).toISOString().slice(0, 19).replace('T', ' ')
+                        });
+                    }
                 }
-                return groupResults;
+                return results;
             } catch (err) {
                 console.error(`❌ Lỗi tại group [${groupId}]:`, err.message);
                 return [];
             }
         };
 
-        // 3. Chạy song song tất cả các group
-        const nestedResults = await Promise.all(groupList.map(id => processGroup(id)));
-        const finalData = nestedResults.flat();
+        // 2. Chạy song song tất cả các group
+        const allNestedResults = await Promise.all(groupList.map(id => processGroup(id)));
+        
+        // 3. Gộp kết quả và GIỚI HẠN 1000 BẢN GHI
+        let finalData = allNestedResults.flat();
+        
+        if (finalData.length > 1000) {
+            console.log(`⚠️ Tìm thấy ${finalData.length} tin, nhưng chỉ lấy 1000 tin đầu tiên.`);
+            finalData = finalData.slice(0, 1000);
+        }
 
-        // 4. Lưu file và trả về kết quả
+        // 4. Trả về và lưu file
         if (finalData.length > 0) {
             const timestamp = Date.now();
-            const fileName = `crawl_${fromRange}_to_${toRange}_${timestamp}.json`;
+            const fileName = `multi_group_video_${timestamp}.json`;
             const finalOutput = {
                 success: true,
-                total_groups: groupList.length,
-                total_messages_found: finalData.length,
+                groups_processed: groupList.length,
+                total_found: finalData.length,
                 data: finalData
             };
+
             fs.writeFileSync(path.join(exportDir, fileName), JSON.stringify(finalOutput, null, 4));
+            console.log(`✅ Thành công! Đã lưu ${finalData.length} tin vào file.`);
             res.json(finalOutput);
         } else {
-            res.json({ success: true, message: "Không tìm thấy nội dung chữ nào phù hợp." });
+            res.json({ success: true, message: "Không tìm thấy video nào có caption.", data: [] });
         }
 
     } catch (error) {
+        console.error("🔥 Server Error:", error);
         res.status(500).json({ success: false, error: error.message });
     }
 });
 
 app.listen(port, async () => {
-    console.log(`🚀 API: http://localhost:${port}`);
+    console.log(`🚀 Server ready: http://localhost:${port}`);
     await client.connect();
 });
